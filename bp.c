@@ -19,6 +19,7 @@ struct btb_entry{
 };
 
 struct btb_entry* btb_table;
+int result_table_size;
 
 unsigned history_max;
 unsigned tag_remove_value;
@@ -29,18 +30,20 @@ unsigned* global_result_table;
 int global_history = 0;
 bool is_global_hist;
 bool is_global_table;
+unsigned default_state;
 
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
 			bool isGlobalHist, bool isGlobalTable, int Shared){
 
     btb_table = (struct btb_entry*)malloc(btbSize * sizeof(struct btb_entry));
-    int result_table_size = pow(2,historySize);
+    result_table_size = pow(2,historySize);
     history_max = (unsigned)result_table_size;
     tag_remove_value = pow(2,32 - tagSize);
     tag_find_divide_value = pow(2,tagSize);
     is_shared = Shared;
     is_global_hist = isGlobalHist;
     is_global_table = isGlobalTable;
+    default_state = fsmState;
 
     // Local history, local table (shared irrelevt).
     if(!isGlobalHist && !isGlobalTable) {
@@ -101,7 +104,7 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
         if(is_global_table && is_shared){
             access_index = index ^ current_hist;
         }else{
-            access_index = index;
+            access_index = current_hist;
         }
 
         unsigned result = current_result_table[access_index];
@@ -121,6 +124,76 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 }
 
 void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
+
+    int index = pc % tag_remove_value;
+    int tag = pc/tag_find_divide_value;
+
+    if(btb_table[index].tag != tag){
+
+        btb_table[index].tag = tag;
+        btb_table[index].target = targetPc;
+
+        int current_hist;
+        if(!is_global_hist){
+            btb_table[index].history = 0;
+            current_hist = btb_table[index].history;
+        }else{
+            current_hist = global_history;
+        }
+
+        if(!is_global_table){
+            for (int i = 0; i < result_table_size; ++i) {
+                btb_table[index].result_table[i] = default_state;
+            }
+        }
+
+        int access_index;
+        if(is_global_table && is_shared){
+            access_index = index ^ current_hist;
+        }else{
+            access_index = current_hist;
+        }
+
+        if(taken && (btb_table[index].result_table[access_index] != STRONGLY_TAKEN)){
+            btb_table[index].result_table[access_index]++;
+        }else if(!taken && (btb_table[index].result_table[access_index] != STRONGLY_NOT_TAKEN)){
+            btb_table[index].result_table[access_index]--;
+        }
+
+        if(!is_global_hist){
+            btb_table[index].history++;
+        }else{
+            global_history++;
+        }
+    }else{
+
+        int current_hist;
+        if(!is_global_hist){
+            current_hist = btb_table[index].history;
+        }else{
+            current_hist = global_history;
+        }
+
+        int access_index;
+        if(is_global_table && is_shared){
+            access_index = index ^ current_hist;
+        }else{
+            access_index = current_hist;
+        }
+
+        if(taken && (btb_table[index].result_table[access_index] != STRONGLY_TAKEN)){
+            btb_table[index].result_table[access_index]++;
+        }else if(!taken && (btb_table[index].result_table[access_index] != STRONGLY_NOT_TAKEN)){
+            btb_table[index].result_table[access_index]--;
+        }
+
+        if(!is_global_hist){
+            btb_table[index].history++;
+        }else{
+            global_history++;
+        }
+    }
+
 	return;
 }
 
