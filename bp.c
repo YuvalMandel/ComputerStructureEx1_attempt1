@@ -27,7 +27,7 @@ unsigned history_max;
 unsigned tag_remove_value;
 unsigned tag_find_divide_value;
 int is_shared;
-
+int btb_size;
 unsigned* global_result_table;
 int global_history = 0;
 bool is_global_hist;
@@ -41,6 +41,7 @@ int theoretical_memory_size;
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
 			bool isGlobalHist, bool isGlobalTable, int Shared){
 
+    btb_size = btbSize;
     btb_table = (struct btb_entry*)malloc(btbSize * sizeof(struct btb_entry));
     result_table_size = pow(2,historySize);
     history_max = (unsigned)result_table_size;
@@ -55,16 +56,15 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
     if(!isGlobalHist && !isGlobalTable) {
         for (int i = 0; i < btbSize; ++i) {
             btb_table[i].history = 0;
-            btb_table[i].result_table = (unsigned *) malloc(result_table_size * sizeof(unsigned));
+            btb_table[i].result_table = (unsigned*)malloc(result_table_size * sizeof(unsigned));
             for (int j = 0; j < result_table_size; ++j) {
                 btb_table[i].result_table[j] = fsmState;
             }
+//            free(btb_table[i].result_table);
+//            btb_table[i].result_table = (unsigned*)malloc(result_table_size * sizeof(unsigned));
         }
         theoretical_memory_size = btbSize*(tagSize + (COMMAND_SIZE - 2) + historySize + result_table_size);
     }else if(!isGlobalHist && isGlobalTable){
-        for (int i = 0; i < btbSize; ++i) {
-            btb_table[i].result_table = (unsigned *) malloc(result_table_size * sizeof(unsigned));
-        }
         for (int j = 0; j < result_table_size; ++j) {
             global_result_table[j] = fsmState;
         }
@@ -76,7 +76,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
         theoretical_memory_size = btbSize*(tagSize + (COMMAND_SIZE - 2)) + historySize + result_table_size;
     }else if(isGlobalHist && !isGlobalTable){
         for (int i = 0; i < btbSize; ++i) {
-            btb_table[i].result_table = (unsigned *) malloc(result_table_size * sizeof(unsigned));
+            btb_table[i].result_table = (unsigned*)malloc(result_table_size * sizeof(unsigned));
             for (int j = 0; j < result_table_size; ++j) {
                 btb_table[i].result_table[j] = fsmState;
             }
@@ -89,7 +89,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 
 bool BP_predict(uint32_t pc, uint32_t *dst){
 
-    int index = pc % tag_remove_value;
+    int index = pc % btb_size;
     int tag = pc/tag_find_divide_value;
 
     if(btb_table[index].tag == tag){
@@ -141,7 +141,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
         num_of_flushes++;
     }
 
-    int index = pc % tag_remove_value;
+    int index = pc % btb_size;
     int tag = pc/tag_find_divide_value;
 
     if(btb_table[index].tag != tag){
@@ -210,13 +210,19 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
         }
     }
 
-	return;
 }
 
 void BP_GetStats(SIM_stats *curStats){
     curStats -> br_num = num_of_updates;
     curStats -> flush_num = num_of_flushes;
     curStats -> size = theoretical_memory_size;
-	return;
+
+//    if(!is_global_table) {
+//        for (int i = 0; i < btb_size; ++i) {
+//            free(btb_table[i].result_table);
+//        }
+//    }
+
+    free(btb_table);
 }
 
