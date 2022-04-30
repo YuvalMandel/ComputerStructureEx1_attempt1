@@ -11,6 +11,8 @@
 #define WEAKLY_TAKEN 2
 #define STRONGLY_TAKEN 3
 
+#define COMMAND_SIZE 32
+
 struct btb_entry{
     int tag;
     uint32_t target;
@@ -31,6 +33,10 @@ int global_history = 0;
 bool is_global_hist;
 bool is_global_table;
 unsigned default_state;
+
+int num_of_updates = 0;
+int num_of_flushes = 0;
+int theoretical_memory_size;
 
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
 			bool isGlobalHist, bool isGlobalTable, int Shared){
@@ -54,6 +60,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
                 btb_table[i].result_table[j] = fsmState;
             }
         }
+        theoretical_memory_size = btbSize*(tagSize + (COMMAND_SIZE - 2) + historySize + result_table_size);
     }else if(!isGlobalHist && isGlobalTable){
         for (int i = 0; i < btbSize; ++i) {
             btb_table[i].result_table = (unsigned *) malloc(result_table_size * sizeof(unsigned));
@@ -61,10 +68,12 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
         for (int j = 0; j < result_table_size; ++j) {
             global_result_table[j] = fsmState;
         }
+        theoretical_memory_size = btbSize*(tagSize + (COMMAND_SIZE - 2) + historySize) + result_table_size;
     }else if(isGlobalHist && isGlobalTable){
         for (int j = 0; j < result_table_size; ++j) {
             global_result_table[j] = fsmState;
         }
+        theoretical_memory_size = btbSize*(tagSize + (COMMAND_SIZE - 2)) + historySize + result_table_size;
     }else if(isGlobalHist && !isGlobalTable){
         for (int i = 0; i < btbSize; ++i) {
             btb_table[i].result_table = (unsigned *) malloc(result_table_size * sizeof(unsigned));
@@ -72,6 +81,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
                 btb_table[i].result_table[j] = fsmState;
             }
         }
+        theoretical_memory_size = btbSize*(tagSize + (COMMAND_SIZE - 2) + result_table_size) + historySize;
     }
 
 	return 0;
@@ -124,6 +134,12 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
 }
 
 void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
+
+    num_of_updates++;
+
+    if((taken && (pred_dst == pc+4)) || (!taken && pred_dst == targetPc)){
+        num_of_flushes++;
+    }
 
     int index = pc % tag_remove_value;
     int tag = pc/tag_find_divide_value;
@@ -198,6 +214,9 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
 }
 
 void BP_GetStats(SIM_stats *curStats){
+    curStats -> br_num = num_of_updates;
+    curStats -> flush_num = num_of_flushes;
+    curStats -> size = theoretical_memory_size;
 	return;
 }
 
