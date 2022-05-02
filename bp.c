@@ -11,6 +11,10 @@
 #define WEAKLY_TAKEN 2
 #define STRONGLY_TAKEN 3
 
+#define NOT_USING_SHARE 0
+#define USING_SHARE_LSB 1
+#define USING_SHARE_MID 2
+
 #define COMMAND_SIZE 32
 
 struct btb_entry{
@@ -18,6 +22,7 @@ struct btb_entry{
     uint32_t target;
     int history;
     unsigned* result_table;
+    bool valid;
 };
 
 struct btb_entry* btb_table;
@@ -25,7 +30,7 @@ int result_table_size;
 
 unsigned tag_remove_value;
 unsigned tag_find_divide_value;
-int is_shared;
+int share_status;
 int btb_size;
 unsigned* global_result_table;
 unsigned int global_history = 0;
@@ -47,17 +52,22 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
     result_table_size = pow(2,historySize);
     tag_remove_value = pow(2,32 - tagSize);
 //    tag_find_divide_value = pow(2,tagSize);
-    is_shared = Shared;
+    share_status = Shared;
     is_global_hist = isGlobalHist;
     is_global_table = isGlobalTable;
     default_state = fsmState;
     tag_size = tagSize;
     history_size = historySize;
 
+    for (int i = 0; i < btbSize; ++i) {
+        btb_table[i].valid = false;
+    }
+
     // Local history, local table (shared irrelevt).
     if(!isGlobalHist && !isGlobalTable) {
         for (int i = 0; i < btbSize; ++i) {
             btb_table[i].history = 0;
+            btb_table[i].valid = false;
             btb_table[i].result_table = (unsigned*)malloc(result_table_size * sizeof(unsigned));
             for (int j = 0; j < result_table_size; ++j) {
                 btb_table[i].result_table[j] = fsmState;
@@ -95,7 +105,7 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
     int index = calc_pc % btb_size;
     int tag = pc >> (32 - tag_size);
 
-    if(btb_table[index].tag == tag){
+    if(btb_table[index].valid == true && btb_table[index].tag == tag){
 
         // Determine history.
         unsigned int current_hist;
@@ -114,8 +124,12 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
         }
 
         int access_index;
-        if(is_global_table && is_shared){
-            access_index = (index ^ current_hist) % result_table_size;
+        if(is_global_table && share_status == USING_SHARE_LSB){
+            unsigned int calc_pc_lsb = pc >> 2;
+            access_index =  (calc_pc_lsb ^ current_hist) % result_table_size;
+        }else if(is_global_table && share_status == USING_SHARE_MID){
+            unsigned int calc_pc_mid = pc >> 16;
+            access_index =  (calc_pc_mid ^ current_hist) % result_table_size;
         }else{
             access_index = current_hist % result_table_size;
         }
@@ -148,8 +162,9 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
     int index = calc_pc % btb_size;
     int tag = pc >> (32 - tag_size);
 
-    if(btb_table[index].tag != tag){
+    if(btb_table[index].valid == false || btb_table[index].tag != tag){
 
+        btb_table[index].valid = true;
         btb_table[index].tag = tag;
         btb_table[index].target = targetPc;
 
@@ -167,10 +182,14 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
         }
 
         int access_index;
-        if(is_global_table && is_shared){
-            access_index = index ^ current_hist;
+        if(is_global_table && share_status == USING_SHARE_LSB){
+            unsigned int calc_pc_lsb = pc >> 2;
+            access_index =  (calc_pc_lsb ^ current_hist) % result_table_size;
+        }else if(is_global_table && share_status == USING_SHARE_MID){
+            unsigned int calc_pc_mid = pc >> 16;
+            access_index =  (calc_pc_mid ^ current_hist) % result_table_size;
         }else{
-            access_index = current_hist;
+            access_index = current_hist % result_table_size;
         }
 
         unsigned* current_result_table;
@@ -211,8 +230,12 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
         }
 
         int access_index;
-        if(is_global_table && is_shared){
-            access_index = index ^ current_hist % result_table_size;
+        if(is_global_table && share_status == USING_SHARE_LSB){
+            unsigned int calc_pc_lsb = pc >> 2;
+            access_index =  (calc_pc_lsb ^ current_hist) % result_table_size;
+        }else if(is_global_table && share_status == USING_SHARE_MID){
+            unsigned int calc_pc_mid = pc >> 16;
+            access_index =  (calc_pc_mid ^ current_hist) % result_table_size;
         }else{
             access_index = current_hist % result_table_size;
         }
