@@ -102,8 +102,10 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 bool BP_predict(uint32_t pc, uint32_t *dst){
 
     unsigned int calc_pc = pc >> 2;
-    int index = calc_pc % btb_size;
-    int tag = pc >> (32 - tag_size);
+    unsigned int index = calc_pc % btb_size;
+    unsigned int b2b_bits =  (unsigned int)log2(btb_size);
+    unsigned int tag_calc_pc = calc_pc >> b2b_bits;
+    unsigned int tag = tag_calc_pc % (unsigned int)pow(2, tag_size);
 
     if(btb_table[index].valid == true && btb_table[index].tag == tag){
 
@@ -159,8 +161,10 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
     }
 
     unsigned int calc_pc = pc >> 2;
-    int index = calc_pc % btb_size;
-    int tag = pc >> (32 - tag_size);
+    unsigned int index = calc_pc % btb_size;
+    unsigned int b2b_bits =  (unsigned int)log2(btb_size);
+    unsigned int tag_calc_pc = calc_pc >> b2b_bits;
+    unsigned int tag = tag_calc_pc % (unsigned int)pow(2, tag_size);
 
     if(btb_table[index].valid == false || btb_table[index].tag != tag){
 
@@ -170,6 +174,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
 
         int current_hist;
         if(!is_global_hist){
+            btb_table[index].history = 0;
             current_hist = btb_table[index].history;
         }else{
             current_hist = global_history;
@@ -206,8 +211,8 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
         }
 
         if(!is_global_hist){
-            btb_table[index].history = 0;
-//            btb_table[index].history = btb_table[index].history << 1;
+//            btb_table[index].history = 0;
+            btb_table[index].history = btb_table[index].history << 1;
             if(taken){
                 btb_table[index].history++;
             }
