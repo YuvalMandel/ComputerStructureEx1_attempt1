@@ -65,6 +65,7 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
         }
         theoretical_memory_size = btbSize*(1 + tagSize + (COMMAND_SIZE - 2) + historySize + 2*result_table_size);
     }else if(!isGlobalHist && isGlobalTable){
+        global_result_table = (unsigned*)malloc(result_table_size * sizeof(unsigned));
         for (int j = 0; j < result_table_size; ++j) {
             global_result_table[j] = fsmState;
         }
@@ -154,7 +155,6 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
 
         int current_hist;
         if(!is_global_hist){
-            btb_table[index].history = 0;
             current_hist = btb_table[index].history;
         }else{
             current_hist = global_history;
@@ -187,7 +187,8 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
         }
 
         if(!is_global_hist){
-            btb_table[index].history = btb_table[index].history << 1;
+            btb_table[index].history = 0;
+//            btb_table[index].history = btb_table[index].history << 1;
             if(taken){
                 btb_table[index].history++;
             }
