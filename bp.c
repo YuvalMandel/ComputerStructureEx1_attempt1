@@ -6,17 +6,20 @@
 #include <math.h>
 #include "bp_api.h"
 
+// FSM states
 #define STRONGLY_NOT_TAKEN 0
 #define WEAKLY_NOT_TAKEN 1
 #define WEAKLY_TAKEN 2
 #define STRONGLY_TAKEN 3
 
+// share status options
 #define NOT_USING_SHARE 0
 #define USING_SHARE_LSB 1
 #define USING_SHARE_MID 2
 
 #define COMMAND_SIZE 32
 
+// Every entry in btb will hold those values, some will be irrelevant, base on config.
 struct btb_entry{
     int tag;
     uint32_t target;
@@ -25,11 +28,11 @@ struct btb_entry{
     bool valid;
 };
 
+// Global btb table.
 struct btb_entry* btb_table;
-int result_table_size;
 
-unsigned tag_remove_value;
-unsigned tag_find_divide_value;
+// Global params we wanna keep.
+int result_table_size;
 int share_status;
 int btb_size;
 unsigned* global_result_table;
@@ -38,8 +41,8 @@ bool is_global_hist;
 bool is_global_table;
 unsigned default_state;
 unsigned tag_size;
-unsigned history_size;
 
+// Global values we return with stats function.
 int num_of_updates = 0;
 int num_of_flushes = 0;
 int theoretical_memory_size;
@@ -47,23 +50,22 @@ int theoretical_memory_size;
 int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned fsmState,
 			bool isGlobalHist, bool isGlobalTable, int Shared){
 
+    // We keep params as global and allocate the global  b2b table.
     btb_size = btbSize;
     btb_table = (struct btb_entry*)malloc(btbSize * sizeof(struct btb_entry));
     result_table_size = pow(2,historySize);
-    tag_remove_value = pow(2,32 - tagSize);
-//    tag_find_divide_value = pow(2,tagSize);
     share_status = Shared;
     is_global_hist = isGlobalHist;
     is_global_table = isGlobalTable;
     default_state = fsmState;
     tag_size = tagSize;
-    history_size = historySize;
 
+    // All the btb entries are invalid at init.
     for (int i = 0; i < btbSize; ++i) {
         btb_table[i].valid = false;
     }
 
-    // Local history, local table (shared irrelevt).
+    // Local history, local table
     if(!isGlobalHist && !isGlobalTable) {
         for (int i = 0; i < btbSize; ++i) {
             btb_table[i].history = 0;
@@ -74,19 +76,25 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
             }
         }
         theoretical_memory_size = btbSize*(1 + tagSize + (COMMAND_SIZE - 2) + historySize + 2*result_table_size);
-    }else if(!isGlobalHist && isGlobalTable){
+    }
+    // Local history, global table
+    else if(!isGlobalHist && isGlobalTable){
         global_result_table = (unsigned*)malloc(result_table_size * sizeof(unsigned));
         for (int j = 0; j < result_table_size; ++j) {
             global_result_table[j] = fsmState;
         }
         theoretical_memory_size = btbSize*(1 + tagSize + (COMMAND_SIZE - 2) + historySize) + 2*result_table_size;
-    }else if(isGlobalHist && isGlobalTable){
+    }
+    // global history, global table
+    else if(isGlobalHist && isGlobalTable){
         global_result_table = (unsigned*)malloc(result_table_size * sizeof(unsigned));
         for (int j = 0; j < result_table_size; ++j) {
             global_result_table[j] = fsmState;
         }
         theoretical_memory_size = btbSize*(1 + tagSize + (COMMAND_SIZE - 2)) + historySize + 2*result_table_size;
-    }else if(isGlobalHist && !isGlobalTable){
+    }
+    // global history, local table
+    else if(isGlobalHist && !isGlobalTable){
         for (int i = 0; i < btbSize; ++i) {
             btb_table[i].result_table = (unsigned*)malloc(result_table_size * sizeof(unsigned));
             for (int j = 0; j < result_table_size; ++j) {
@@ -101,12 +109,16 @@ int BP_init(unsigned btbSize, unsigned historySize, unsigned tagSize, unsigned f
 
 bool BP_predict(uint32_t pc, uint32_t *dst){
 
+    // We calc the b2b index.
     unsigned int calc_pc = pc >> 2;
     unsigned int index = calc_pc % btb_size;
+
+    // We calc the tag.
     unsigned int b2b_bits =  (unsigned int)log2(btb_size);
     unsigned int tag_calc_pc = calc_pc >> b2b_bits;
     unsigned int tag = tag_calc_pc % (unsigned int)pow(2, tag_size);
 
+    // If there is a valid entry, we check the table, else return false.
     if(btb_table[index].valid == true && btb_table[index].tag == tag){
 
         // Determine history.
@@ -125,6 +137,7 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
             current_result_table = btb_table[index].result_table;
         }
 
+        // Calc the fsm table index.
         int access_index;
         if(is_global_table && share_status == USING_SHARE_LSB){
             unsigned int calc_pc_lsb = pc >> 2;
@@ -136,8 +149,10 @@ bool BP_predict(uint32_t pc, uint32_t *dst){
             access_index = current_hist % result_table_size;
         }
 
+        // access the fsm table.
         unsigned result = current_result_table[access_index];
 
+        // If the result is WT or ST, return true and update target. else return false.
         if(result == WEAKLY_TAKEN || result == STRONGLY_TAKEN){
             *dst = btb_table[index].target;
             return true;
@@ -156,6 +171,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
 
     num_of_updates++;
 
+    // We kush if misspredict earlier.
     if((taken && (pred_dst == pc+4)) || (!taken && pred_dst == targetPc)){
         num_of_flushes++;
     }
@@ -166,6 +182,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
     unsigned int tag_calc_pc = calc_pc >> b2b_bits;
     unsigned int tag = tag_calc_pc % (unsigned int)pow(2, tag_size);
 
+    // If the new entry access an invalid btb entry or one with a different tag, we overwrite.
     if(btb_table[index].valid == false || btb_table[index].tag != tag){
 
         btb_table[index].valid = true;
@@ -174,6 +191,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
 
         int current_hist;
         if(!is_global_hist){
+            // If it's local history and overwrite, we change history to 0.
             btb_table[index].history = 0;
             current_hist = btb_table[index].history;
         }else{
@@ -181,6 +199,7 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
         }
 
         if(!is_global_table){
+            // If local fsm table, we default the table values.
             for (int i = 0; i < result_table_size; ++i) {
                 btb_table[index].result_table[i] = default_state;
             }
@@ -204,14 +223,15 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
             current_result_table = btb_table[index].result_table;
         }
 
+        // We change the fsm state based on the branch taken.
         if(taken && (current_result_table[access_index] != STRONGLY_TAKEN)){
             current_result_table[access_index]++;
         }else if(!taken && (current_result_table[access_index] != STRONGLY_NOT_TAKEN)){
             current_result_table[access_index]--;
         }
 
+        // We update the history.
         if(!is_global_hist){
-//            btb_table[index].history = 0;
             btb_table[index].history = btb_table[index].history << 1;
             if(taken){
                 btb_table[index].history++;
@@ -225,7 +245,9 @@ void BP_update(uint32_t pc, uint32_t targetPc, bool taken, uint32_t pred_dst){
             global_history = global_history % result_table_size;
         }
 
-    }else{
+    }
+    // If there is a relevant entry in table, we update.
+    else{
 
         int current_hist;
         if(!is_global_hist){
@@ -279,16 +301,6 @@ void BP_GetStats(SIM_stats *curStats){
     curStats -> br_num = num_of_updates;
     curStats -> flush_num = num_of_flushes;
     curStats -> size = theoretical_memory_size;
-
-//    if(!is_global_table) {
-//        for (int i = 0; i < btb_size; ++i) {
-//            free(btb_table[i].result_table);
-//        }
-//    }
-
-//    if(is_global_table) {
-//        free(global_result_table);
-//    }
 
     free(btb_table);
 }
